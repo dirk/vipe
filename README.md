@@ -17,6 +17,8 @@ The __vipe__ ecosystem consists of a standard for defining visual programs (see 
     
     vipe program.xml
 
+__Please note__, if you're going to be hacking from source, remember to call `jake build` after downloading the source and after modifying any of the libraries, then call `npm link`! If you add a library that's written in CoffeeScript, add it to the `libs` array in the Jakefile so that it will be converted to JavaScript.
+
 # Contributing
 
 Fork and pull, baby! Current big-ticket items are __documentation (and comments)__, building an easily extensible __library system__ so that anyone can write nodes to use in their programs, and putting together the __web editor__. Feel free to post issues or send me a tweet [@esherido](http://twitter.com/esherido) (I gladly accept any non-sketchy/spammy/botty follow requests).

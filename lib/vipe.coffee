@@ -89,7 +89,7 @@ Vipe =
       parser.parseString raw_xml
     run: ->
       if @starts.length == 0
-        console.log '[prsr] No starting nodes specified, aborting!'
+        console.log "[sys]\tNo starting nodes specified, aborting!"
         process.exit()
       for start in @starts
         @nodes[start].start this.open_thread()
@@ -104,7 +104,7 @@ Vipe =
       if index != -1
         @threads.splice(index, 1);
         if Vipe.debug
-          console.log "[thrd]\t##{t} closed (#{@threads.join ', '} still open)"
+          console.log "[sys]\t##{t} closed (#{@threads.join ', '} still open)"
     node: (node_data) ->
       # Initialize a node.
       try
