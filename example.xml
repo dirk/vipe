@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<document>
+  <head>
+    <lib version="0.1">core</lib>
+    <lib>http</lib>
+    <start>server_node</start>
+  </head>
+  <nodes>
+    <node id="port_node" type="core.string">
+      <value>1337</value>
+      <output name="string">server_node/port</output>
+    </node>
+    <node id="host_node" type="core.string">
+      <value>127.0.0.1</value>
+      <output name="string">server_node/host</output>
+    </node>
+    <node id="server_node" type="http.server">
+      <input name="port">port_node/string</input>
+      <input name="host">host_node/string</input>
+      <output name="response">write_head_node/response</output>
+    </node>
+    <node id="header_hash_node" type="core.hash">
+      <value key="Content-Type">text/plain</value>
+      <output name="hash">write_head_node/hash</output>
+    </node>
+    <node id="write_head_node" type="http.res.writeHead">
+      <input name="response">server_node/response</input>
+      <input name="hash">header_hash_node/hash</input>
+      <output name="response">write_node/response</output>
+    </node>
+    <node id="body_node" type="core.string">
+      <value>Hello World!</value>
+      <output name="string">write_node/string</output>
+    </node>
+    <node id="write_node" type="http.res.write">
+      <input name="response">write_head_node/response</input>
+      <input name="string">body_node/string</input>
+      <output name="response">close_node/response</output>
+    </node>
+    <node id="close_node" type="http.close">
+      <input name="response">write_node/response</input>
+    </node>
+  </nodes>
+</document>
