@@ -5,6 +5,9 @@
   "homepage": "https://github.com/dirk/vipe",
   "keywords": ["coffeescript", "visual"],
   "author": "dirk",
+  "scripts": {
+    "preinstall": "jake build"
+  },
   "dependencies": {
     "coffee-script": ">= 1.1.1",
     "xml2js": ">= 0.1.6",
