@@ -1,13 +1,14 @@
 {
   "name": "vipe",
   "description": "Visual programming environment",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "homepage": "https://github.com/dirk/vipe",
   "keywords": ["coffeescript", "visual"],
   "author": "dirk",
   "dependencies": {
-    "coffee-script": "1.1.1",
-    "xml2js": "0.1.6"
+    "coffee-script": ">= 1.1.1",
+    "xml2js": ">= 0.1.6",
+    "jake": ">= 0.1.0"
   },
   "directories": {"lib": "./lib"},
   "engines": {"nocde": ">= 0.4.7"},

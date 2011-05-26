@@ -1,9 +1,15 @@
 _ = (require 'underscore')._
+path = require 'path'
 sys = require 'sys'
 fs = require 'fs'
 xml2js = require 'xml2js'
 events = require 'events'
 pass = null
+
+# http://stackoverflow.com/questions/1418050/string-strip-for-javascript
+if typeof(String.prototype.trim) == "undefined"
+  String.prototype.trim = -> 
+    return String(this).replace(/^\s+|\s+$/g, '')
 
 ensure_array = (array) ->
   if _.isUndefined(array)
@@ -12,16 +18,24 @@ ensure_array = (array) ->
     if _.isArray array then array else [array]
 
 exports.run = ->
+  # Startup system for use with the command line.
   unless process.argv.length == 3
     console.log 'No file given!'
     return
-  file = process.argv.slice 2
+  file = (process.argv.slice 2).join('')
   
+  # Print out the version
+  if file.trim() == '-v'
+    console.log Vipe.version
+    return
+  
+  # Initialize the parser with the files contents.
   new Vipe.Parser fs.readFileSync("./#{file}"), (vipe) ->
+    # Once it's loaded then run the program.
     vipe.run()
 
 class Element
-  # Mocking an XML element.
+  # Contains an XML element so that it's data can be easily accessed.
   constructor: (data) ->
     @attributes = {}
     @content = ''
@@ -43,47 +57,65 @@ class Element
     if attr then @attributes[attr] else @attributes
 
 Vipe =
+  version: '0.0.2'
+  # Paths to search on for libraries (currently not implemented)
+  lib_path: [path.join path.dirname(fs.realpathSync __filename), '../lib/libs']
+  # Best to leave this to true for now.
   debug: true
   Parser: class
+    # The good stuff.
     constructor: (raw_xml, callback) ->
-      @nodes = {}
-      @libs = {}
-      @starts = []
-      @next_thread = 1
-      @threads = []
+      @nodes = {} # All the nodes in the current system.
+      @libs = {} # Stores the loaded libraries.
+      @starts = [] # List of nodes to call .start(thread) on.
+      @next_thread = 1 # The counter for the next thread to initialize.
+      @threads = [] # List of currently running threads.
       
       parser = new xml2js.Parser
       parser.addListener 'end', (result) =>
-        #_(result.lib)
         if result.head
+          # Load each library you find in the head
           _(ensure_array result.head.lib).each (lib) =>
             this.lib((new Element(lib)).content)
+          # Make sure you have somewhere to begin.
+          @starts = ensure_array(result.head.start)
+        # Go through each node and initialize it.
         _(ensure_array(result.nodes.node)).each (node) =>
           this.node node
-        @starts = ensure_array(result.head.start)
-        
+        # Fire off that callback once everything is done.
         callback this
+      
+      # Finally, parse that raw data.
       parser.parseString raw_xml
     run: ->
+      if @starts.length == 0
+        console.log '[prsr] No starting nodes specified, aborting!'
+        process.exit()
       for start in @starts
         @nodes[start].start this.open_thread()
     open_thread: ->
+      # Utility to open a new processing thread.
       old = @next_thread
       @threads.push @next_thread++
       return old
     close_thread: (t) ->
+      # Mark a thread as closed.
       index = @threads.indexOf(t);
       if index != -1
         @threads.splice(index, 1);
         if Vipe.debug
-          console.log "- Thread #{t} closed"
+          console.log "[thrd]\t##{t} closed (#{@threads.join ', '} still open)"
     node: (node_data) ->
-      #console.log(@types)
-      #console.log(node_data['@']['type'])
+      # Initialize a node.
       try
-        @nodes[node_data['@']['id']] = new @libs[node_data['@']['type']](
+        # Splits http.res.write into 'http' and 'res.write'.
+        parts = node_data['@']['type'].split('.')
+        lib_name = parts[0]
+        node_nade = parts[1..].join('.')
+        # Store the node by it's ID/name in the @nodes object and initialize the node object with it's data.
+        @nodes[node_data['@']['id']] = new @libs[lib_name].nodes[node_nade](
           node_data['@']['id'],
-          node_data['@']['type'],
+          node_data['@']['type'], # Note, this is the class of the node; not to be confused with data types.
           (new Element(e)) for e in ensure_array(node_data['input']),
           (new Element(e)) for e in ensure_array(node_data['output']),
           (new Element(e)) for e in ensure_array(node_data['reference']),
@@ -92,17 +124,37 @@ Vipe =
         )
       catch e
         if e.type is 'called_non_callable'
-          console.log "Could not find library type '#{node_data['@']['type']}'"
+          console.log "Could not find library node type '#{node_data['@']['type']}'"
         else
           throw e
       
     
     lib: (name) ->
-      if libs[name].nodes
-        _(libs[name].nodes).each (val, key) =>
-          @libs[name+'.'+key] = val
+      # Load a library
+      # TODO: Make this actually scan all available lib_path's
+      sys.print "[lib]\t#{name} loading... "
+      
+      lib_path = path.join(Vipe.lib_path[0], name)
+      failed = true
+      try
+        stat = fs.lstatSync(lib_path+'.js')
+        failed = false
+        
+        @libs[name] = require(lib_path).lib
+        if _.isFunction(@libs[name].loaded)
+          @libs[name].loaded(this)
+        console.log 'Done'
+      catch e
+        pass
+      
+      if failed
+        console.log 'Failed'
+        console.log "[lib]\tCould not find library '#{name}'"
+        console.log "[lib]\tLibrary load path:"
+        console.log Vipe.lib_path
       
   Node: class extends events.EventEmitter
+    # Foundation for all nodes; make sure to call super whenever you override constructor!
     constructor: (@id, @type, inputs, outputs, references, values, @parent) ->
       @inputs = {}
       @outputs = {}
@@ -124,6 +176,7 @@ Vipe =
         else
           @values[i] = value.content
           i++
+    # Make a thread object has been created for the current thread!
     ensure_thread: (thread) ->
       unless @threads[thread]
         @threads[thread] = {inputs: {}, outputs: {}, references: {}}
@@ -133,12 +186,14 @@ Vipe =
     references_filled: (thread) ->
       _.size(@threads[thread].references) == _.size(@references)
     
+    # Reaches out to every input and gives it a handy tap.
+    # Can specify an input name as the second variable to tell it not to tap a specific input.
     ping_inputs: (thread, except = false) ->
       this.ensure_thread(thread)
       _(@inputs).each (input) =>
         if (except != false and input.source != except) or !except
           input.ping(thread)
-    
+    # Called by another node (source) to put an input "letter" (object) into one of its "mailboxes" (name).
     input: (name, source, object, thread) ->
       this.ensure_thread(thread)
       @threads[thread].inputs[name] = object
@@ -146,7 +201,7 @@ Vipe =
         this.emit('inputs', thread, @threads[thread].inputs)
       else
         this.ping_inputs thread, source
-      
+    # Same as input, except with references.
     reference: (name, source, object, thread) ->
       this.ensure_thread(thread)
       @threads[thread].references[name] = object
@@ -154,13 +209,16 @@ Vipe =
         this.emit('reference', thread, object)
       if this.references_filled(thread)
         this.emit('references', thread, @threads[thread].references)
+    # Overrride this (remember to call super!) to handle incoming pings.
     ping: (name, dest, thread) ->
-      #pass
       if Vipe.debug
-        console.log "- Ping to #{name} from #{dest} on thread #{thread}"
+        console.log "[ping]\tto #{name} from #{dest} on thread #{thread}"
+    # Called by Vipe.Parser. Override if necessary; default is to call this.ping_inputs for the specified thread;
+    # although this may not be necessary.
     start: (thread) ->
       this.ping_inputs(thread)
-      
+  # Classes to store data for inputs, references, and outputs.
+  # Note that @node refers to the @parent, not the source/destination, node.
   NodeInput: class
     constructor: (@name, @node, source) ->
       parts = source.split('/')
@@ -186,93 +244,4 @@ Vipe =
       else @output = false
 
 
-http = require 'http'
-
-libs =
-  core:
-    types:
-      string: class
-        constructor: (@value) ->
-          @type = 'core/string'
-      hash: class
-        constructor: (@value) ->
-          @type = 'core/hash'
-    nodes:
-      string: class extends Vipe.Node
-        value: ->
-          _(@values).values().join ''
-        ping: (name, dest, thread) ->
-          super
-          output = (output for output in _(@outputs).values() when output.dest == dest)[0]
-          @parent.nodes[output.dest].input(output.input, @id, this.value(), thread)
-      hash: class extends Vipe.Node
-        ping: (name, dest, thread) ->
-          super
-          output = (output for output in _(@outputs).values() when output.dest == dest)[0]
-          @parent.nodes[output.dest].input(output.input, @id, @values, thread)
-
-  http:
-    types:
-      response: class
-        constructor: (@server, @request, @response) ->
-          @type = 'http/response'
-    nodes:
-      'server': class extends Vipe.Node
-        constructor: ->
-          super
-          
-          @server = null
-          
-          this.on 'inputs', (thread, inputs) =>
-            ###
-            http.createServer(function (req, res) {
-              res.writeHead(200, {'Content-Type': 'text/plain'});
-              res.end('Hello World\n');
-            }).listen(1337, "127.0.0.1");
-            console.log('Server running at http://127.0.0.1:1337/');
-            ###
-            output = @outputs.response
-            if !@server
-              @server = http.createServer((req, res) =>
-                @parent.nodes[output.dest].input(output.input, @id, new libs.http.types.response(this.server, req, res), @parent.open_thread())
-              )
-              @server.listen(parseInt(inputs.port), inputs.host)
-      'res.writeHead': class extends Vipe.Node
-        constructor: ->
-          super
-          
-          this.on 'inputs', (thread, inputs) =>
-            inputs.response.response.writeHead(200, inputs.hash)
-            output = @outputs.response
-            @parent.nodes[output.dest].input(output.input, @id, inputs.response, thread)
-            
-      'res.write': class extends Vipe.Node
-        constructor: ->
-          super
-          
-          this.on 'inputs', (thread, inputs) =>
-            inputs.response.response.write(inputs.string)
-            output = @outputs.response
-            @parent.nodes[output.dest].input(output.input, @id, inputs.response, thread)
-      'close': class extends Vipe.Node
-        constructor: ->
-          super
-          
-          this.on 'inputs', (thread, inputs) =>
-            inputs.response.response.end()
-            @parent.close_thread(thread)
-
-
-
-
-
-#console.log fs.readFileSync '../example.xml'
-
-#console.log 'there'
-#console.log xml2js.Parser
-
-#console.log (fs.readFileSync '../example.xml').toString()
-
-
-
-#console.log (new Vipe.Node).emit
+exports.Node = Vipe.Node
